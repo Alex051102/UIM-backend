@@ -1,43 +1,188 @@
 const express = require('express');
+const { createClient } = require('@supabase/supabase-js');
 
 const app = express();
 
-// Простой CORS
+// CORS
 app.use((req, res, next) => {
   res.header('Access-Control-Allow-Origin', '*');
   res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Content-Type');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   next();
 });
 
 app.use(express.json());
 
-// Простой тест
+// Безопасная инициализация Supabase
+let supabase;
+try {
+  const supabaseUrl = process.env.SUPABASE_URL;
+  const supabaseKey = process.env.SUPABASE_KEY;
+
+  if (supabaseUrl && supabaseKey) {
+    supabase = createClient(supabaseUrl, supabaseKey);
+    console.log('✅ Supabase initialized');
+  } else {
+    console.log('⚠️ Supabase credentials not set, using test mode');
+  }
+} catch (error) {
+  console.log('❌ Supabase init error:', error.message);
+}
+
+// Тестовый маршрут
 app.get('/api/test', (req, res) => {
-  console.log('✅ Test endpoint called');
   res.json({
     message: 'Backend работает! 🚀',
     timestamp: new Date().toISOString(),
+    supabase: supabase ? 'Connected' : 'Test mode',
   });
 });
 
-// Простая регистрация (без Supabase пока)
-app.post('/api/register', (req, res) => {
-  console.log('📝 Register called:', req.body);
-  res.json({
-    success: true,
-    message: 'Регистрация успешна (тестовый режим)',
-    user: { id: 'test-' + Date.now(), email: req.body.email },
-  });
+// Регистрация
+app.post('/api/register', async (req, res) => {
+  try {
+    const { email, password, name } = req.body;
+
+    if (!email || !password) {
+      return res.status(400).json({
+        success: false,
+        error: 'Email и пароль обязательны',
+      });
+    }
+
+    // Если Supabase не настроен - тестовый режим
+    if (!supabase) {
+      return res.json({
+        success: true,
+        message: 'Регистрация (тестовый режим)',
+        user: {
+          id: 'test-' + Date.now(),
+          email: email,
+          name: name,
+        },
+      });
+    }
+
+    // Регистрация в Supabase
+    const { data, error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        data: {
+          name: name || '',
+          created_at: new Date().toISOString(),
+        },
+      },
+    });
+
+    if (error) {
+      return res.status(400).json({
+        success: false,
+        error: error.message,
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'Пользователь зарегистрирован',
+      user: data.user,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: 'Ошибка сервера: ' + error.message,
+    });
+  }
 });
 
-// Корневой маршрут
-app.get('/', (req, res) => {
-  res.json({
-    message: 'Life Tracker API is running!',
-    status: 'OK',
-  });
+// Логин
+app.post('/api/login', async (req, res) => {
+  try {
+    const { email, password } = req.body;
+
+    if (!email || !password) {
+      return res.status(400).json({
+        success: false,
+        error: 'Email и пароль обязательны',
+      });
+    }
+
+    // Если Supabase не настроен - тестовый режим
+    if (!supabase) {
+      return res.json({
+        success: true,
+        message: 'Вход (тестовый режим)',
+        user: {
+          id: 'test-user-123',
+          email: email,
+        },
+      });
+    }
+
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    });
+
+    if (error) {
+      return res.status(400).json({
+        success: false,
+        error: error.message,
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'Успешный вход',
+      user: data.user,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: 'Ошибка сервера: ' + error.message,
+    });
+  }
 });
 
-// Экспортируем app для Vercel
+// Трекер активности
+app.post('/api/track', async (req, res) => {
+  try {
+    const { activity, value, user_id } = req.body;
+
+    if (!supabase) {
+      return res.json({
+        success: true,
+        message: 'Активность записана (тестовый режим)',
+        activity: activity,
+        value: value,
+      });
+    }
+
+    const { data, error } = await supabase
+      .from('activities')
+      .insert([
+        {
+          user_id: user_id,
+          activity: activity,
+          value: value,
+          created_at: new Date().toISOString(),
+        },
+      ])
+      .select();
+
+    if (error) throw error;
+
+    res.json({
+      success: true,
+      message: `Активность "${activity}" записана`,
+      record: data[0],
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: 'Ошибка сохранения: ' + error.message,
+    });
+  }
+});
+
 module.exports = app;
