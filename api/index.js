@@ -1,22 +1,20 @@
 const express = require('express');
-const cors = require('cors');
 const { createClient } = require('@supabase/supabase-js');
 
 const app = express();
 
-// Настройка CORS
-app.use(
-  cors({
-    origin: [
-      'https://uim-frontend-one.vercel.app',
-      'http://localhost:3000',
-      'http://localhost:5173',
-    ],
-    credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
-  }),
-);
+// Очень простой CORS
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+
+  next();
+});
 
 app.use(express.json());
 
@@ -24,9 +22,6 @@ app.use(express.json());
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseKey = process.env.SUPABASE_KEY;
 const supabase = createClient(supabaseUrl, supabaseKey);
-
-// Обработка preflight запросов
-app.options('*', cors());
 
 // Тестовый маршрут
 app.get('/api/test', (req, res) => {
@@ -39,6 +34,8 @@ app.get('/api/test', (req, res) => {
 // Регистрация пользователя
 app.post('/api/register', async (req, res) => {
   try {
+    console.log('Register request:', req.body);
+
     const { email, password, name } = req.body;
 
     if (!email || !password) {
@@ -53,25 +50,28 @@ app.post('/api/register', async (req, res) => {
       password,
       options: {
         data: {
-          name: name,
+          name: name || '',
           created_at: new Date().toISOString(),
         },
       },
     });
 
     if (error) {
+      console.log('Supabase error:', error);
       return res.status(400).json({
         error: error.message,
       });
     }
 
+    console.log('Registration success:', data.user?.email);
+
     res.json({
       success: true,
       message: 'Пользователь зарегистрирован',
       user: data.user,
-      session: data.session,
     });
   } catch (error) {
+    console.log('Server error:', error);
     res.status(500).json({
       error: 'Ошибка сервера: ' + error.message,
     });
@@ -81,6 +81,8 @@ app.post('/api/register', async (req, res) => {
 // Логин пользователя
 app.post('/api/login', async (req, res) => {
   try {
+    console.log('Login request:', req.body);
+
     const { email, password } = req.body;
 
     const { data, error } = await supabase.auth.signInWithPassword({
@@ -89,30 +91,32 @@ app.post('/api/login', async (req, res) => {
     });
 
     if (error) {
+      console.log('Login error:', error);
       return res.status(400).json({
         error: error.message,
       });
     }
 
+    console.log('Login success:', data.user?.email);
+
     res.json({
       success: true,
       message: 'Успешный вход',
       user: data.user,
-      session: data.session,
     });
   } catch (error) {
+    console.log('Server error:', error);
     res.status(500).json({
       error: 'Ошибка сервера: ' + error.message,
     });
   }
 });
 
-// Трекер активности (только для авторизованных)
+// Трекер активности
 app.post('/api/track', async (req, res) => {
   try {
     const { activity, value, user_id } = req.body;
 
-    // Сохраняем в Supabase
     const { data, error } = await supabase
       .from('activities')
       .insert([
@@ -143,7 +147,7 @@ app.post('/api/track', async (req, res) => {
   }
 });
 
-// Получение статистики пользователя
+// Получение статистики
 app.get('/api/stats/:user_id', async (req, res) => {
   try {
     const { user_id } = req.params;
@@ -168,6 +172,11 @@ app.get('/api/stats/:user_id', async (req, res) => {
       error: 'Ошибка загрузки: ' + error.message,
     });
   }
+});
+
+// Health check
+app.get('/', (req, res) => {
+  res.json({ message: 'Life Tracker API is running!' });
 });
 
 module.exports = app;
