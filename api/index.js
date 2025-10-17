@@ -1,14 +1,13 @@
 const express = require('express');
-const cors = require('cors');
 const { createClient } = require('@supabase/supabase-js');
 
 const app = express();
-app.use(cors());
 app.use(express.json());
 
 // Supabase клиент
-const supabaseUrl = process.env.SUPABASE_URL;
-const supabaseKey = process.env.SUPABASE_KEY;
+const supabaseUrl = 'https://fxklbgmonojvmrwooyif.supabase.co';
+const supabaseKey =
+  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZ4a2xiZ21vbm9qdm1yd29veWlmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjA1NTc2MzcsImV4cCI6MjA3NjEzMzYzN30.oCuhJIeqINchH447pNNuFryqfDceiy_fIhOPOMJn6d4';
 const supabase = createClient(supabaseUrl, supabaseKey);
 
 // Тестовый маршрут
@@ -19,7 +18,7 @@ app.get('/api/test', (req, res) => {
   });
 });
 
-// Регистрация пользователя
+// Регистрация
 app.post('/api/register', async (req, res) => {
   try {
     const { email, password, name } = req.body;
@@ -30,13 +29,12 @@ app.post('/api/register', async (req, res) => {
       });
     }
 
-    // Регистрация в Supabase
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
       options: {
         data: {
-          name: name,
+          name: name || '',
           created_at: new Date().toISOString(),
         },
       },
@@ -52,7 +50,6 @@ app.post('/api/register', async (req, res) => {
       success: true,
       message: 'Пользователь зарегистрирован',
       user: data.user,
-      session: data.session,
     });
   } catch (error) {
     res.status(500).json({
@@ -61,7 +58,7 @@ app.post('/api/register', async (req, res) => {
   }
 });
 
-// Логин пользователя
+// Логин
 app.post('/api/login', async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -81,74 +78,10 @@ app.post('/api/login', async (req, res) => {
       success: true,
       message: 'Успешный вход',
       user: data.user,
-      session: data.session,
     });
   } catch (error) {
     res.status(500).json({
       error: 'Ошибка сервера: ' + error.message,
-    });
-  }
-});
-
-// Трекер активности (только для авторизованных)
-app.post('/api/track', async (req, res) => {
-  try {
-    const { activity, value, user_id } = req.body;
-
-    // Сохраняем в Supabase
-    const { data, error } = await supabase
-      .from('activities')
-      .insert([
-        {
-          user_id: user_id,
-          activity: activity,
-          value: value,
-          created_at: new Date().toISOString(),
-        },
-      ])
-      .select();
-
-    if (error) {
-      throw error;
-    }
-
-    res.json({
-      success: true,
-      activity: activity,
-      value: value,
-      record: data[0],
-      message: `Активность "${activity}" записана`,
-    });
-  } catch (error) {
-    res.status(500).json({
-      error: 'Ошибка сохранения: ' + error.message,
-    });
-  }
-});
-
-// Получение статистики пользователя
-app.get('/api/stats/:user_id', async (req, res) => {
-  try {
-    const { user_id } = req.params;
-
-    const { data, error } = await supabase
-      .from('activities')
-      .select('*')
-      .eq('user_id', user_id)
-      .order('created_at', { ascending: false });
-
-    if (error) {
-      throw error;
-    }
-
-    res.json({
-      user_id: user_id,
-      activities: data,
-      total_entries: data.length,
-    });
-  } catch (error) {
-    res.status(500).json({
-      error: 'Ошибка загрузки: ' + error.message,
     });
   }
 });
