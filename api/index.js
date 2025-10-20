@@ -3,7 +3,6 @@ const { createClient } = require('@supabase/supabase-js');
 
 const app = express();
 
-// CORS
 app.use((req, res, next) => {
   res.header('Access-Control-Allow-Origin', '*');
   res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
@@ -13,18 +12,14 @@ app.use((req, res, next) => {
 
 app.use(express.json());
 
-// Безопасная инициализация Supabase
 let supabase;
 try {
-  const supabaseUrl = process.env.SUPABASE_URL;
-  const supabaseKey = process.env.SUPABASE_KEY;
+  const supabaseUrl = 'https://fxklbgmonojvmrwooyif.supabase.co';
+  const supabaseKey =
+    'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZ4a2xiZ21vbm9qdm1yd29veWlmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjA1NTc2MzcsImV4cCI6MjA3NjEzMzYzN30.oCuhJIeqINchH447pNNuFryqfDceiy_fIhOPOMJn6d4';
 
-  if (supabaseUrl && supabaseKey) {
-    supabase = createClient(supabaseUrl, supabaseKey);
-    console.log('✅ Supabase initialized');
-  } else {
-    console.log('⚠️ Supabase credentials not set, using test mode');
-  }
+  supabase = createClient(supabaseUrl, supabaseKey);
+  console.log('✅ Supabase initialized');
 } catch (error) {
   console.log('❌ Supabase init error:', error.message);
 }
@@ -38,10 +33,14 @@ app.get('/api/test', (req, res) => {
   });
 });
 
-// Регистрация
 app.post('/api/register', async (req, res) => {
   try {
-    const { email, password, name } = req.body;
+    const { email, password, name, surveyData } = req.body;
+
+    console.log('📨 Получены данные регистрации:');
+    console.log('- Email:', email);
+    console.log('- Name:', name);
+    console.log('- Весь surveyData:', JSON.stringify(surveyData, null, 2));
 
     if (!email || !password) {
       return res.status(400).json({
@@ -63,7 +62,7 @@ app.post('/api/register', async (req, res) => {
       });
     }
 
-    // Регистрация в Supabase
+    // Регистрация в Supabase Auth
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
@@ -82,20 +81,87 @@ app.post('/api/register', async (req, res) => {
       });
     }
 
+    // ✅ СОЗДАЕМ ПРОФИЛЬ С ДАННЫМИ ОПРОСНИКА
+    if (data.user) {
+      const survey = surveyData || {};
+      const baseInfo = survey.base || [];
+      const goals = survey.goals || [];
+      const habits = survey.habits || [];
+      const aiSupport = survey.ai_support || null; // ✅ Ищем ai_support
+
+      console.log('🔍 Извлеченные данные:');
+      console.log('- baseInfo:', baseInfo);
+      console.log('- goals:', goals);
+      console.log('- habits:', habits);
+      console.log('- ai_support:', aiSupport);
+      console.log('- activity:', survey.activity);
+
+      // Обрабатываем гендер
+      let gender = null;
+      const genderValue = baseInfo[3];
+      if (genderValue) {
+        if (
+          genderValue.toLowerCase().includes('муж') ||
+          genderValue.toLowerCase().includes('male')
+        ) {
+          gender = 'male';
+        } else if (
+          genderValue.toLowerCase().includes('жен') ||
+          genderValue.toLowerCase().includes('female')
+        ) {
+          gender = 'female';
+        } else {
+          gender = genderValue;
+        }
+      }
+
+      // Подготавливаем данные для вставки
+      const profileData = {
+        user_id: data.user.id,
+        email: email,
+        name: name || '',
+        password: password,
+
+        // Базовые данные
+        gender: gender,
+        age: parseInt(baseInfo[0]) || null,
+        height: parseInt(baseInfo[1]) || null,
+        weight: parseInt(baseInfo[2]) || null,
+
+        // Цели и активность
+        activity_level: survey.activity || null,
+        goals: goals,
+        habits: habits,
+        ai_support: aiSupport, // ✅ Используем извлеченное значение
+
+        // Статус
+        completed_survey: true,
+      };
+
+      console.log('📝 Финальные данные для БД:', profileData);
+
+      const { error: profileError } = await supabase.from('user_profiles').insert([profileData]);
+
+      if (profileError) {
+        console.error('❌ Ошибка создания профиля:', profileError);
+      } else {
+        console.log('✅ Профиль успешно создан в БД');
+      }
+    }
+
     res.json({
       success: true,
       message: 'Пользователь зарегистрирован',
       user: data.user,
     });
   } catch (error) {
+    console.error('💥 Ошибка сервера:', error);
     res.status(500).json({
       success: false,
       error: 'Ошибка сервера: ' + error.message,
     });
   }
 });
-
-// Логин
 app.post('/api/login', async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -144,48 +210,42 @@ app.post('/api/login', async (req, res) => {
   }
 });
 
-// Трекер активности
-app.post('/api/track', async (req, res) => {
+app.get('/api/survey/check/:user_id', async (req, res) => {
   try {
-    const { activity, value, user_id } = req.body;
+    const { user_id } = req.params;
 
     if (!supabase) {
       return res.json({
         success: true,
-        message: 'Активность записана (тестовый режим)',
-        activity: activity,
-        value: value,
+        completed_survey: false,
       });
     }
 
-    const { data, error } = await supabase
-      .from('activities')
-      .insert([
-        {
-          user_id: user_id,
-          activity: activity,
-          value: value,
-          created_at: new Date().toISOString(),
-        },
-      ])
-      .select();
+    const { data: profile, error } = await supabase
+      .from('user_profiles')
+      .select('completed_survey')
+      .eq('user_id', user_id)
+      .single();
 
-    if (error) throw error;
+    if (error) {
+      return res.json({
+        success: true,
+        completed_survey: false,
+      });
+    }
 
     res.json({
       success: true,
-      message: `Активность "${activity}" записана`,
-      record: data[0],
+      completed_survey: profile.completed_survey,
     });
   } catch (error) {
     res.status(500).json({
       success: false,
-      error: 'Ошибка сохранения: ' + error.message,
+      error: 'Ошибка проверки опросника',
     });
   }
 });
 
-// Добавляем запуск сервера
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
